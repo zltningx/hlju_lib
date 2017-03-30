@@ -53,13 +53,36 @@ class libPYL(object):
             Executor.submit(self.get_sit())
 
     def get_sit(self):
+
+        def del_response(request):
+            try:
+                sit_values = re.findall(r"BespeakSeatClick\(\"(.*?)\"\)\'", request)
+                sit_keys = re.findall(r">(\d+)</div>", request)
+                return dict(map(lambda x, y: [x, y], sit_keys, sit_values))
+            except Exception as e:
+                raise e
+
+        if not cfg:
+            print("请检查文件目录下是否有 UserInfo.cfg 文件")
+            print("缺少配置文件，程序退出～")
+            return
+        if cfg.has_section("FIX_SIT_POSITION"):
+            QUEST_POST['roomNum'] = cfg["FIX_SIT_POSITION"]["room_number"]
+            positon = cfg["FIX_SIT_POSITION"]["fix_position"]
+        else:
+            result = self.papapa.post(QUEST_URL,
+                                      data=QUEST_POST,
+                                      headers=REGISTER_HEADER)
+            pass
         # result = self.papapa.post(REGISTER_URL,
         #                           headers=REGISTER_HEADER,
-        #                           data=REGISTER_POST)
+        #                           data=REGISTER_POST) //214
         result = self.papapa.post(QUEST_URL,
                                   data=QUEST_POST,
                                   headers=REGISTER_HEADER)
-        print(result.text)
+        position_dict = del_response(result.text)
+        if position_dict:
+            print(position_dict)
 
     def send_email(self, sit_location):
         cfg.read_file(open("UserInfo.cfg", 'r'))
