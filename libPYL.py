@@ -1,9 +1,9 @@
-from concurrent.futures import ThreadPoolExecutor
 import requests
 import configparser
 import smtplib
 import re
-import datetime
+from datetime import datetime, timedelta
+from time import sleep
 from email.mime.text import MIMEText
 
 __author__ = "https://github.com/zltningx"
@@ -13,7 +13,7 @@ cfg = configparser.ConfigParser()
 cfg.read_file(open("UserInfo.cfg", 'r'))
 
 
-def create_config(username, password):
+def create_config_user(username, password):
     try:
         cfg.add_section("USER_INFO")
         cfg.set("USER_INFO", "username", username)
@@ -28,14 +28,24 @@ def create_config(username, password):
         raise e
 
 
+def create_config_sit(room_number, fix_position):
+    try:
+        cfg.add_section("FIX_SIT_POSITION")
+        cfg.set("FIX_SIT_POSITION", "room_number", room_number)
+        cfg.set("FIX_SIT_POSITION", "fix_position", fix_position)
+        cfg.write(open("UserInfo.cfg", 'w'))
+    except Exception as e:
+        raise e
+
+
 class libPYL(object):
     def __init__(self):
         self.papapa = requests.session()
 
     def login(self):
         if not cfg:
-            print("请检查文件目录下是否有 UserInfo.cfg 文件")
-            print("缺少配置文件，程序退出～")
+            print("[!] 请检查文件目录下是否有 UserInfo.cfg 文件")
+            print("[!] 缺少配置文件，程序退出～")
             return
         if cfg.has_section("USER_INFO"):
             _POST["txtUserName"] = cfg['USER_INFO']['username']
@@ -46,14 +56,76 @@ class libPYL(object):
             password = input("Password<你懂># ")
             _POST["txtUserName"] = username
             _POST["txtPassword"] = password
-            create_config(username, password)
+            create_config_user(username, password)
         self.papapa.get(LOGIN_URL)
         self.papapa.post(LOGIN_URL, headers=LOGIN_HEADER, data=_POST)
-        with ThreadPoolExecutor(int(cfg['THREAD']['thread_number'])) as Executor:
-            Executor.submit(self.get_sit())
+        # TODO: execute self.executor
+        while True:
+            self.executor()
+            sleep(3)
 
-    def get_sit(self):
+    def set_config(self, del_response):
+        """
+        function only used by libPYL.executor()
+        :return: Dynamic Key | None
+        """
+        for id, value in ROOM_SIT_LIST.items():
+            print("id: {id} -- {room}".format(id=id, room=value))
+        print("[*] 选择座位号后再次使用程序自动选择该座位～ "
+              "若座位已被预约将随机选择本区域预约～")
+        print("[*] 配置好Userinfo.cfg 文件 [OPTION_SIT_POSITION] "
+              "的区域可以设置备选座位(默认为随机选择座位）")
+        room_number = input("输入选择区域id: ")
+        while True:
+            if room_number not in ROOM_SIT_LIST.keys():
+                print("[!] @(一-一) 貌似选错了哟没有 {id} 这个区域"
+                      .format(id=room_number))
+            else:
+                break
+        QUEST_POST['roomNum'] = room_number
+        results = self.papapa.post(QUEST_URL,
+                                   data=QUEST_POST,
+                                   headers=REGISTER_HEADER)
 
+        position_dicts = del_response(results.text)
+        if position_dicts:
+            print("[I] 区域 {id} 有如下座位请根据记忆选座(～ o ～)~zZ : ")
+            for i, position_id in enumerate(position_dicts.keys()):
+                print(position_id, end=" ")
+                if (i + 1) % 16 == 0:
+                    print()
+            print()
+            position = input("[I] 输入选择座位id: ")
+            while True:
+                if position not in position_dicts.keys():
+                    print("[!] @(一-一) 貌似选错了哟座位不在 {id} 里".
+                          format(id=ROOM_SIT_LIST[room_number]))
+                    position = input("输入选择座位id: ")
+                else:
+                    break
+            # 都成功了才写入配置文件
+            create_config_sit(room_number, position)
+            # 获取动态key
+            dynamic_key = position_dicts[position]
+            return dynamic_key
+
+        return None
+
+    def get_sit(self, dynamic_key):
+        REAL_REGISTER_URL = REGISTER_URL + dynamic_key
+        response = self.papapa.post(REAL_REGISTER_URL,
+                                    headers=REGISTER_HEADER,
+                                    data=REGISTER_POST)
+        if response.headers["Content-Length"] == "374":
+            print("[*] Get Sit Successful!")
+            return True
+        else:
+            return False
+
+    def executor(self):
+        """
+        function require libPYL.set_config
+        """
         def del_response(request):
             try:
                 sit_values = re.findall(r"BespeakSeatClick\(\"(.*?)\"\)\'", request)
@@ -63,26 +135,55 @@ class libPYL(object):
                 raise e
 
         if not cfg:
-            print("请检查文件目录下是否有 UserInfo.cfg 文件")
-            print("缺少配置文件，程序退出～")
+            print("[!] 请检查文件目录下是否有 UserInfo.cfg 文件")
+            print("[!] 缺少配置文件，程序退出～")
             return
-        if cfg.has_section("FIX_SIT_POSITION"):
-            QUEST_POST['roomNum'] = cfg["FIX_SIT_POSITION"]["room_number"]
-            positon = cfg["FIX_SIT_POSITION"]["fix_position"]
-        else:
-            result = self.papapa.post(QUEST_URL,
-                                      data=QUEST_POST,
-                                      headers=REGISTER_HEADER)
-            pass
-        # result = self.papapa.post(REGISTER_URL,
-        #                           headers=REGISTER_HEADER,
-        #                           data=REGISTER_POST) //214
+
         result = self.papapa.post(QUEST_URL,
                                   data=QUEST_POST,
                                   headers=REGISTER_HEADER)
-        position_dict = del_response(result.text)
-        if position_dict:
-            print(position_dict)
+
+        if cfg.has_section("FIX_SIT_POSITION"):
+            QUEST_POST['roomNum'] = cfg["FIX_SIT_POSITION"]["room_number"]
+            fix_position = cfg["FIX_SIT_POSITION"]["fix_position"]
+            # TODO: checkout
+            if QUEST_POST['roomNum'] not in ROOM_SIT_LIST.keys():
+                print("[!] 配置文件出错 ERROR: 配置id对应区域不存在~ 请重新配置： ")
+                dynamic_key = self.set_config(del_response)
+            else:
+                position_dict = del_response(result.text)
+                if not position_dict:
+                    print("[!] 无法获取座位")
+                    return
+                if fix_position not in position_dict.keys():
+                    print("[!] 配置文件出错 ERROR: 配置position对应座位"
+                          "号不存在~ 请重新配置： ")
+                    dynamic_key = self.set_config(del_response)
+                else:
+                    # checkout ends
+                    # TODO: get dynamic key by config file
+                    if not position_dict[fix_position]:
+                        print("[*] 座位已经被抢了～ 快去配置文件修改座位吧～")
+                    dynamic_key = position_dict[fix_position]
+
+        else:
+            dynamic_key = self.set_config(del_response)
+
+        # 执行完上述代码 roomNum & sit_key到手
+        if dynamic_key:
+            if self.get_sit(dynamic_key):
+                try:
+                    pass
+                    # self.send_email(
+                    #      ROOM_SIT_LIST[cfg["FIX_SIT_POSITION"]["room_number"]]
+                    #      + "--" + cfg["FIX_SIT_POSITION"]["fix_position"])
+                except Exception as e:
+                    raise e
+            else:
+                print("[*] 长度匹配失败～")
+        else:
+            print("[!] 座位获取失败～")
+            pass
 
     def send_email(self, sit_location):
         cfg.read_file(open("UserInfo.cfg", 'r'))
@@ -114,11 +215,9 @@ class libPYL(object):
 
 
 def get_time_now():
-    tmp = datetime.datetime.now().strftime("%y/%m/")
-    day = int(datetime.datetime.now().strftime("%d")) + 1
-    tmp += str(day)
-
-    return "20"+tmp
+    now = datetime.now()
+    time = now + timedelta(days=1)
+    return time.strftime("%Y/%m/%d")
 
 
 if __name__ == "__main__":
@@ -196,12 +295,12 @@ if __name__ == "__main__":
         "101004": "老图： 三楼阅览室",
         "101006": "老图： 一楼自习室",
         "102001": "新图： 二楼大厅",
-        "102002": "三楼三角区",
-        "102003": "四楼三角区",
-        "102004": "一层自习室（B109)",
-        "102005": "一层自习室二(B107)",
-        "102006": "三层回廊",
-        "102007": "四层回廊",
+        "102002": "新图: 三楼三角区",
+        "102003": "新图: 四楼三角区",
+        "102004": "新图: 一层自习室（B109)",
+        "102005": "新图: 一层自习室二(B107)",
+        "102006": "新图: 三层回廊",
+        "102007": "新图: 四层回廊",
     }
 
     lib = libPYL()
