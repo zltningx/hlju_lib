@@ -38,6 +38,15 @@ def create_config_sit(room_number, fix_position):
         raise e
 
 
+def time_control(now):
+    today = now.strftime("%H,%M")
+    count = [int(i) for i in today.split(",")]
+    if (count[0] >= 18) and (count[0] < 23):
+        if count[0] == 18 and count[1] < 30:
+            return False
+        return True
+
+
 class libPYL(object):
     def __init__(self):
         self.papapa = requests.session()
@@ -61,8 +70,9 @@ class libPYL(object):
         self.papapa.post(LOGIN_URL, headers=LOGIN_HEADER, data=_POST)
         # TODO: execute self.executor
         while True:
-            self.executor()
-            sleep(3)
+            if time_control(datetime.now()):
+                self.executor()
+            sleep(5)
 
     def set_config(self, del_response):
         """
